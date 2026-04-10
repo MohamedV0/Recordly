@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import electron from "electron";
 import ffmpegStatic from "ffmpeg-static";
+import ffprobeStatic from "@derhuerst/ffprobe-static";
 
 const execFileAsync = promisify(execFile);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -302,32 +303,18 @@ async function createFixtureVideo(
 	});
 }
 
-function parseDurationSeconds(ffmpegOutput) {
-	const match = ffmpegOutput.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/i);
-	if (!match) {
-		return null;
-	}
-
-	return (
-		Number.parseInt(match[1], 10) * 3600 +
-		Number.parseInt(match[2], 10) * 60 +
-		Number.parseFloat(match[3])
-	);
-}
-
-async function inspectOutput(ffmpegPath, targetPath) {
+async function inspectOutput(ffprobePath, targetPath) {
 	try {
-		const { stderr } = await execFileAsync(
-			ffmpegPath,
-			["-hide_banner", "-i", targetPath, "-f", "null", "-"],
-			{
-				timeout: 30_000,
-				maxBuffer: 20 * 1024 * 1024,
-			},
+		const { stdout } = await execFileAsync(
+			ffprobePath,
+			["-v", "error", "-of", "json", "-show_format", "-i", targetPath],
+			{ timeout: 10_000, maxBuffer: 1024 * 1024 },
 		);
-		return parseDurationSeconds(stderr);
-	} catch (error) {
-		return parseDurationSeconds(String(error?.stderr ?? ""));
+		const parsed = JSON.parse(stdout);
+		const duration = Number.parseFloat(parsed?.format?.duration);
+		return Number.isFinite(duration) && duration > 0 ? duration : null;
+	} catch {
+		return null;
 	}
 }
 
@@ -735,7 +722,7 @@ async function runVariant(
 	}
 
 	const elapsedMs = Math.round(performance.now() - startedAt);
-	const outputDuration = await inspectOutput(ffmpegPath, outputPath);
+	const outputDuration = await inspectOutput(ffprobeStatic, outputPath);
 
 	return {
 		elapsedMs,
